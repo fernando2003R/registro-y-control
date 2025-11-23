@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Iniciar sesión</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f7f7f8;color:#111;display:flex;min-height:100vh;align-items:center;justify-content:center}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:20px;width:320px;box-shadow:0 2px 10px rgba(0,0,0,0.05)}
+    h1{margin:0 0 12px 0;font-size:20px}
+    label{display:block;margin:8px 0 4px}
+    input{width:100%;padding:10px;border:1px solid #ccc;border-radius:6px}
+    button{width:100%;margin-top:12px;background:#0d6efd;color:#fff;border:none;border-radius:6px;padding:10px;font-weight:700;cursor:pointer}
+    .msg{color:#b00020;margin-top:8px;min-height:20px}
+  </style>
+  <script defer src="/login.js"></script>
+</head>
+<body>
+  <div class="card">
+    <h1>Inicio</h1>
+    <div class="row" style="margin-bottom:8px">
+      <div>
+        <label>Modo</label>
+        <select id="mode">
+          <option value="admin">Acceso administrador</option>
+          <option value="student">Registro estudiante</option>
+        </select>
+      </div>
+    </div>
+    <div id="adminForm">
+      <label>Código administrador</label>
+      <input type="password" id="code" placeholder="Ingresa tu código">
+      <button id="go">Entrar</button>
+    </div>
+    <div id="studentForm" style="display:none">
+      <label>Tipo</label>
+      <select id="kind">
+        <option value="escolar">Escolar</option>
+        <option value="universitario">Universitario</option>
+      </select>
+      <label>ID del lector (número)</label>
+      <input id="id" placeholder="Ej: 1001">
+      <div id="escolarFields">
+        <label>Nombre</label>
+        <input id="name" placeholder="Nombre completo">
+        <label>Grado</label>
+        <input id="grade" placeholder="Ej: 9°A">
+      </div>
+      <div id="uniFields" style="display:none">
+        <label>Código universitario</label>
+        <input id="stu_code" placeholder="Ej: 20231234">
+      </div>
+      <button id="save">Guardar</button>
+    </div>
+    <div id="msg" class="msg"></div>
+  </div>
+</body>
+</html>

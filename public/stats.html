@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estadísticas del Día</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f7f7f8;color:#111}
+    header{background:#0d6efd;color:#fff;padding:16px}
+    main{padding:16px;max-width:1000px;margin:0 auto}
+    .grid{display:grid;grid-template-columns:1fr;gap:16px}
+    @media (min-width:900px){.grid{grid-template-columns:2fr 1fr}}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px}
+    canvas{width:100%;height:300px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid #eee}
+    th{background:#f0f3f7;text-align:left}
+    a{color:#fff;text-decoration:none}
+    .nav{display:flex;align-items:center;justify-content:space-between}
+    .btn{background:#0d6efd;color:#fff;border:none;border-radius:6px;padding:8px 12px;font-weight:600;cursor:pointer}
+    .btn-alt{background:#6c757d}
+  </style>
+  <script defer src="/stats.js"></script>
+</head>
+<body>
+  <header>
+    <div class="nav">
+      <h1 style="margin:0">Estadísticas del Día</h1>
+      <div style="display:flex;gap:8px">
+        <a class="btn btn-alt" href="/">Dashboard</a>
+        <a class="btn" href="/index.html">Registro</a>
+        <button id="logout" class="btn btn-alt">Cerrar sesión</button>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="card" style="margin-bottom:16px;display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+      <div>
+        <label>Inicio</label>
+        <input type="date" id="startDate">
+      </div>
+      <div>
+        <label>Fin</label>
+        <input type="date" id="endDate">
+      </div>
+      <button id="applyRange" class="btn">Aplicar</button>
+      <button id="today" class="btn btn-alt">Hoy</button>
+    </div>
+    <div class="cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:16px">
+      <div class="card"><div>Pico por hora</div><div id="peakHour" style="font-size:28px;font-weight:800">-</div></div>
+      <div class="card"><div>Eventos en pico</div><div id="peakValue" style="font-size:28px;font-weight:800">0</div></div>
+      <div class="card"><div>Ratio entrada/salida</div><div id="ratioES" style="font-size:28px;font-weight:800">-</div></div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3 style="margin-top:0">Eventos por hora</h3>
+        <canvas id="chartHours"></canvas>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Top estudiantes</h3>
+        <table>
+          <thead><tr><th>Estudiante</th><th>Entradas</th><th>Salidas</th><th>Total</th></tr></thead>
+          <tbody id="topBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">Acumulado en el rango</h3>
+      <canvas id="chartCum"></canvas>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin-top:0">Últimos escaneos</h3>
+      <table>
+        <thead><tr><th>Hora</th><th>Estudiante</th><th>Tipo</th></tr></thead>
+        <tbody id="lastBody"></tbody>
+      </table>
+    </div>
+  </main>
+</body>
+</html>

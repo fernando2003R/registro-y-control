@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f7f7f8;color:#111}
+    header{background:#0d6efd;color:#fff;padding:16px}
+    main{padding:20px;max-width:1000px;margin:0 auto}
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:16px}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px;text-align:center}
+    .big{font-size:32px;font-weight:800}
+    .actions{display:flex;gap:12px;margin-top:24px}
+    .btn{background:#0d6efd;color:#fff;border:none;border-radius:8px;padding:12px 16px;font-weight:700;cursor:pointer}
+    .btn-secondary{background:#198754}
+    .btn-alt{background:#6c757d}
+    a.btn{display:inline-block;text-decoration:none}
+  </style>
+  <script defer src="/dashboard.js"></script>
+</head>
+<body>
+  <header>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <h1 style="margin:0">Dashboard</h1>
+      <div style="display:flex;gap:8px">
+        <button id="reconnect" class="btn btn-secondary">Reconectar puerto</button>
+        <button id="logout" class="btn btn-alt">Cerrar sesión</button>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="cards">
+      <div class="card"><div>Presentes</div><div id="presentes" class="big">0</div></div>
+      <div class="card"><div>Entradas hoy</div><div id="entradas" class="big">0</div></div>
+      <div class="card"><div>Salidas hoy</div><div id="salidas" class="big">0</div></div>
+      <div class="card"><div>Eventos hoy</div><div id="eventos" class="big">0</div></div>
+    </div>
+    <div class="actions">
+      <a class="btn btn-secondary" href="/index.html">Ir al registro</a>
+      <a class="btn" href="/stats.html">Ver estadísticas</a>
+      <button id="reset" class="btn btn-alt">Reiniciar registro</button>
+    </div>
+  </main>
+</body>
+</html>

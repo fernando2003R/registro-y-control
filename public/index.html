@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Registro de Entradas y Salidas</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f7f7f8;color:#111}
+    header{background:#0d6efd;color:#fff;padding:16px}
+    main{padding:16px;max-width:900px;margin:0 auto}
+    .stats{display:flex;gap:12px;margin:12px 0}
+    .stat{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px;flex:1;text-align:center}
+    table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden}
+    th,td{padding:10px;border-bottom:1px solid #eee}
+    th{background:#f0f3f7;text-align:left}
+    .tipo-entrada{color:#0a7e1e;font-weight:600}
+    .tipo-salida{color:#b00020;font-weight:600}
+  </style>
+  <script defer src="/app.js"></script>
+  </head>
+<body>
+  <header>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <a href="/" style="background:#6c757d;color:#fff;border:none;border-radius:6px;padding:8px 12px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block">← Dashboard</a>
+        <h1 style="margin:0">Registro de Entradas y Salidas</h1>
+      </div>
+      <div style="display:flex;gap:8px">
+        <a href="/stats.html" style="background:#0d6efd;color:#fff;border:none;border-radius:6px;padding:10px 14px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block">Estadísticas</a>
+        <button id="reset" style="background:#dc3545;color:#fff;border:none;border-radius:6px;padding:10px 14px;font-weight:600;cursor:pointer">Reiniciar registro</button>
+        <button id="logout" style="background:#6c757d;color:#fff;border:none;border-radius:6px;padding:10px 14px;font-weight:600;cursor:pointer">Cerrar sesión</button>
+      </div>
+    </div>
+    <div id="port-info"></div>
+  </header>
+  <main>
+    <div class="stats">
+      <div class="stat"><div>Presentes</div><div id="presentes" style="font-size:24px;font-weight:700">0</div></div>
+      <div class="stat"><div>Entradas</div><div id="entradas" style="font-size:24px;font-weight:700">0</div></div>
+      <div class="stat"><div>Salidas</div><div id="salidas" style="font-size:24px;font-weight:700">0</div></div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Hora</th>
+          <th>Estudiante</th>
+          <th>Tipo</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </main>
+</body>
+</html>
