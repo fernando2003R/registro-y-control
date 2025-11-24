@@ -31,10 +31,10 @@ export default async function handler(req, res){
       }
     } catch {}
     items.push({ student_id, type, ts });
-    await put(dayKey, JSON.stringify(items), { access: 'private', token, contentType: 'application/json' });
+    await put(dayKey, JSON.stringify(items), { access: 'public', token, contentType: 'application/json' });
     res.json({ ok: true, backend: 'blob' });
     return;
   } catch (e) {
-    res.status(500).json({ ok: false, error: 'storage_unavailable' });
+    res.status(500).json({ ok: false, error: 'storage_unavailable', detail: String(e && e.message ? e.message : e) });
   }
 }
