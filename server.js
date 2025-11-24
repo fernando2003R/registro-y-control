@@ -14,6 +14,13 @@ const CLOUD_ENDPOINT = process.env.CLOUD_ENDPOINT || ""; // e.g., https://your-v
 
 const app = express();
 app.use(express.json());
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", process.env.CORS_ORIGIN || "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") { res.status(200).end(); return; }
+  next();
+});
 const openedPorts = new Set();
 const portInstances = new Map();
 const sseClients = new Set();
