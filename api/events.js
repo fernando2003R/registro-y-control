@@ -1,4 +1,4 @@
-exports.default = async (req, res) => {
+export default async function handler(req, res){
   if (req.method !== 'POST') { res.status(405).json({ ok: false }); return; }
   try {
     const { kv } = await import('@vercel/kv');
@@ -13,4 +13,4 @@ exports.default = async (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, error: 'kv_unavailable' });
   }
-};
+}

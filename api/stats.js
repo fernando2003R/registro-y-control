@@ -1,6 +1,6 @@
-const { dayBounds } = require('./_utils');
+import { dayBounds } from './_utils.js';
 
-exports.default = async (req, res) => {
+export default async function handler(req, res){
   try {
     const { kv } = await import('@vercel/kv');
     const q = req.query || {};
@@ -20,4 +20,4 @@ exports.default = async (req, res) => {
   } catch (e) {
     res.status(500).json({ entradas: 0, salidas: 0, presentes: 0 });
   }
-};
+}
