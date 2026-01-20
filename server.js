@@ -1,7 +1,8 @@
 const express = require("express");
 const path = require("path");
 const Database = require("better-sqlite3");
-const { SerialPort } = require("serialport");
+const { SerialPort, ReadlineParser } = require("serialport");
+const nodemailer = require("nodemailer");
 const crypto = require("crypto");
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
@@ -11,6 +12,47 @@ const SERIAL_MOCK = String(process.env.SERIAL_MOCK || "false").toLowerCase() ===
 const ADMIN_CODE = process.env.ADMIN_CODE || "1234";
 const SESSION_SECRET = process.env.SESSION_SECRET || "local-secret";
 const CLOUD_ENDPOINT = process.env.CLOUD_ENDPOINT || ""; // e.g., https://your-vercel-domain.vercel.app/api/events
+const TYPE_STRATEGY = (process.env.TYPE_STRATEGY || "toggle").toLowerCase();
+const STRICT_IDS = String(process.env.STRICT_IDS || "false").toLowerCase() === "true";
+const SCAN_WINDOW_MS = parseInt(process.env.SCAN_WINDOW_MS || "3000", 10);
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const SMTP_HOST = process.env.SMTP_HOST || "";
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || "0", 10);
+const SMTP_USER = process.env.SMTP_USER || "";
+const SMTP_PASS = process.env.SMTP_PASS || "";
+const SMTP_FROM = process.env.SMTP_FROM || "";
+const EMAIL_WEBHOOK_URL = process.env.EMAIL_WEBHOOK_URL || "";
+const EMAIL_WEBHOOK_PROVIDER = (process.env.EMAIL_WEBHOOK_PROVIDER || "").toLowerCase();
+let mailer = null;
+try {
+  if (SMTP_HOST && SMTP_PORT && SMTP_FROM) {
+    mailer = nodemailer.createTransport({ host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465, auth: (SMTP_USER && SMTP_PASS) ? { user: SMTP_USER, pass: SMTP_PASS } : undefined });
+  }
+} catch {}
+try { console.log(mailer ? "Correo habilitado" : "Correo deshabilitado"); } catch {}
+
+async function trySendEmail(to, subject, text){
+  if (mailer) {
+    try {
+      await mailer.sendMail({ from: SMTP_FROM, to, subject, text });
+      try { console.log(`Correo enviado a ${to}`); } catch {}
+      return true;
+    } catch (e) {
+      try { console.warn(`Error correo a ${to}: ${e && e.message ? e.message : String(e)}`); } catch {}
+    }
+  }
+  if (EMAIL_WEBHOOK_URL) {
+    try {
+      const body = EMAIL_WEBHOOK_PROVIDER === 'ifttt' ? { value1: to, value2: subject, value3: text } : { to, subject, text };
+      await fetch(EMAIL_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      try { console.log(`Webhook email disparado`); } catch {}
+      return true;
+    } catch (e) {
+      try { console.warn(`Error webhook email: ${e && e.message ? e.message : String(e)}`); } catch {}
+    }
+  }
+  return false;
+}
 
 const app = express();
 app.use(express.json());
@@ -24,6 +66,7 @@ app.use((req, res, next) => {
 const openedPorts = new Set();
 const portInstances = new Map();
 const sseClients = new Set();
+const rawLog = [];
 const db = new Database(path.join(__dirname, "data.sqlite"));
 
 db.exec(
@@ -31,6 +74,9 @@ db.exec(
 );
 db.exec(
   "CREATE TABLE IF NOT EXISTS students (id TEXT PRIMARY KEY, kind TEXT CHECK(kind IN ('escolar','universitario')), name TEXT, grade TEXT, code TEXT)"
+);
+db.exec(
+  "CREATE TABLE IF NOT EXISTS parents (id INTEGER PRIMARY KEY AUTOINCREMENT, student_id TEXT NOT NULL, name TEXT, tg_chat_id TEXT, phone TEXT, email TEXT, UNIQUE(student_id))"
 );
 
 const insertEvent = db.prepare(
@@ -49,6 +95,15 @@ const upsertStudent = db.prepare(
   "INSERT INTO students (id, kind, name, grade, code) VALUES (@id, @kind, @name, @grade, @code) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, name=excluded.name, grade=excluded.grade, code=excluded.code"
 );
 const getStudent = db.prepare("SELECT id, kind, name, grade, code FROM students WHERE id = ?");
+const getStudentByCode = db.prepare("SELECT id, kind, name, grade, code FROM students WHERE code = ?");
+const getStudentByName = db.prepare("SELECT id, kind, name, grade, code FROM students WHERE lower(name) = lower(?)");
+const upsertParent = db.prepare(
+  "INSERT INTO parents (student_id, name, tg_chat_id, phone, email) VALUES (?, ?, ?, ?, ?) ON CONFLICT(student_id) DO UPDATE SET name=excluded.name, tg_chat_id=excluded.tg_chat_id, phone=excluded.phone, email=excluded.email"
+);
+const getParentByStudent = db.prepare("SELECT id, student_id, name, tg_chat_id, phone, email FROM parents WHERE student_id = ?");
+const selectEventsForStudentBetween = db.prepare(
+  "SELECT id, student_id, type, ts FROM events WHERE student_id = ? AND ts BETWEEN ? AND ? ORDER BY ts DESC"
+);
 
 function nowIso() {
   return new Date().toISOString();
@@ -58,36 +113,169 @@ function parseLine(raw) {
   const s = String(raw).trim();
   if (!s) return null;
   const lower = s.toLowerCase();
-  const type =
-    lower.includes("entrada") || lower.includes("ingreso") ? "entrada" :
-    (lower.includes("salida") || lower.includes("egreso")) ? "salida" :
-    null;
-  const idMatch = s.match(/\d+/);
-  const studentId = idMatch ? idMatch[0] : null;
-  if (!studentId) return null;
-  return { studentId, type };
+  let studentId = null;
+  let type = null;
+
+  if (lower.includes("movimiento")) {
+    const m = s.match(/movimiento\s*:\s*(\d+)\s*:[^:]*:[^:]*:(ingreso|salida)\s*:\s*(dentro|fuera)/i);
+    if (m) {
+      studentId = m[1];
+      type = m[2].toLowerCase() === "ingreso" ? "entrada" : "salida";
+      return { studentId, type };
+    }
+    const m2 = s.match(/movimiento\s*:\s*(\d+)\s*:[^:]*:(ingreso|salida)/i);
+    if (m2) {
+      studentId = m2[1];
+      type = m2[2].toLowerCase() === "ingreso" ? "entrada" : "salida";
+      return { studentId, type };
+    }
+    return null;
+  }
+  if (lower.includes("estado actual") || lower.includes("sistema_control_activo") || lower.startsWith("estudiante:")) {
+    return null;
+  }
+  return null;
 }
 
 function resolveType(studentId, explicitType) {
-  if (explicitType) return explicitType;
+  if (TYPE_STRATEGY === "explicit" && explicitType) return explicitType;
   const row = selectLastTypeForStudent.get(studentId);
   if (!row) return "entrada";
   return row.type === "entrada" ? "salida" : "entrada";
 }
 
 function recordEventFromLine(line) {
-  const parsed = parseLine(line);
-  if (!parsed) return;
-  const type = resolveType(parsed.studentId, parsed.type);
-  const ts = nowIso();
-  insertEvent.run(parsed.studentId, type, ts);
-  if (CLOUD_ENDPOINT) {
-    const payload = { student_id: parsed.studentId, type, ts };
-    try { fetch(CLOUD_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {}); } catch {}
+  const lower = String(line).toLowerCase();
+  if (lower.includes("estado actual") || lower.includes("sistema_control_activo")) return;
+
+  // Captura movimiento para usarlo cuando llegue ACCESO_PERMITIDO
+  const mov = String(line).match(/movimiento\s*:\s*(\d+)\s*:[^:]*:[^:]*:(ingreso|salida)(?::(dentro|fuera))?/i);
+  if (mov) {
+    const now = Date.now();
+    const studentId = mov[1];
+    const typeExp = mov[2].toLowerCase() === "ingreso" ? "entrada" : "salida";
+    recordEventFromLine.lastMove = { id: studentId, type: typeExp, at: now, committed: false };
+    const exists = getStudent.get(studentId) || getStudentByCode.get(studentId);
+    if (STRICT_IDS && !exists) return;
+    if (!recordEventFromLine.window) recordEventFromLine.window = { at: 0, id: null };
+    if (now - recordEventFromLine.window.at < SCAN_WINDOW_MS) {
+      if (studentId !== recordEventFromLine.window.id) return;
+      recordEventFromLine.window.at = now;
+    } else {
+      recordEventFromLine.window.at = now;
+      recordEventFromLine.window.id = studentId;
+    }
+    if (!recordEventFromLine.recent) recordEventFromLine.recent = new Map();
+    const lastTs = recordEventFromLine.recent.get(studentId) || 0;
+    if (now - lastTs < 2000) return;
+    recordEventFromLine.recent.set(studentId, now);
+    const type = resolveType(studentId, typeExp);
+    const ts = nowIso();
+    insertEvent.run(studentId, type, ts);
+    recordEventFromLine.lastMove.committed = true;
+    recordEventFromLine.window = { at: 0, id: null };
+    try {
+      const p = getParentByStudent.get(studentId);
+      if (p && p.email) {
+        const s = getStudent.get(studentId);
+        const label = s ? (s.kind === "escolar" && s.name && s.grade ? `${s.name} (${s.grade})` : (s.kind === "universitario" && s.code ? s.code : s.id)) : studentId;
+        const subject = `Registro ${type}`;
+        const text = `Registro de asistencia\nAlumno: ${label}\nEvento: ${type}\nHora: ${new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}`;
+        trySendEmail(p.email, subject, text);
+      }
+    } catch {}
+    if (CLOUD_ENDPOINT) {
+      const payload = { student_id: studentId, type, ts };
+      try { fetch(CLOUD_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {}); } catch {}
+    }
+    const payload = { student_id: studentId, type, ts };
+    for (const res of sseClients) { try { res.write(`data: ${JSON.stringify(payload)}\n\n`); } catch {} }
+    return;
   }
-  const payload = { student_id: parsed.studentId, type, ts };
-  for (const res of sseClients) {
-    try { res.write(`data: ${JSON.stringify(payload)}\n\n`); } catch {}
+
+  // Confirma acceso y registra usando el último movimiento cercano
+  const acc = lower.match(/acceso_permitido\s*[:\-]?\s*(ingreso|salida)/);
+  if (acc) {
+    const now = Date.now();
+    const last = recordEventFromLine.lastMove;
+    if (!last || (now - last.at) > 3000) return;
+    if (last.committed) return;
+    const studentId = last.id;
+    const typeExp = acc[1] === "ingreso" ? "entrada" : "salida";
+    const exists = getStudent.get(studentId) || getStudentByCode.get(studentId);
+    if (STRICT_IDS && !exists) return;
+    if (!recordEventFromLine.window) recordEventFromLine.window = { at: 0, id: null };
+    if (now - recordEventFromLine.window.at < SCAN_WINDOW_MS) {
+      if (studentId !== recordEventFromLine.window.id) return;
+      recordEventFromLine.window.at = now;
+    } else {
+      recordEventFromLine.window.at = now;
+      recordEventFromLine.window.id = studentId;
+    }
+    if (!recordEventFromLine.recent) recordEventFromLine.recent = new Map();
+    const lastTs = recordEventFromLine.recent.get(studentId) || 0;
+    if (now - lastTs < 2000) return;
+    recordEventFromLine.recent.set(studentId, now);
+    const type = resolveType(studentId, typeExp);
+    const ts = nowIso();
+    insertEvent.run(studentId, type, ts);
+    recordEventFromLine.window = { at: 0, id: null };
+    recordEventFromLine.lastMove = null;
+    try {
+      const p = getParentByStudent.get(studentId);
+      if (p && p.email) {
+        const s = getStudent.get(studentId);
+        const label = s ? (s.kind === "escolar" && s.name && s.grade ? `${s.name} (${s.grade})` : (s.kind === "universitario" && s.code ? s.code : s.id)) : studentId;
+        const subject = `Registro ${type}`;
+        const text = `Registro de asistencia\nAlumno: ${label}\nEvento: ${type}\nHora: ${new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}`;
+        trySendEmail(p.email, subject, text);
+      }
+    } catch {}
+    if (CLOUD_ENDPOINT) {
+      const payload = { student_id: studentId, type, ts };
+      try { fetch(CLOUD_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {}); } catch {}
+    }
+    const payload = { student_id: studentId, type, ts };
+    for (const res of sseClients) { try { res.write(`data: ${JSON.stringify(payload)}\n\n`); } catch {} }
+    // Notificaciones y SSE más abajo
+  } else {
+    const parsed = parseLine(line);
+    if (!parsed) return;
+    const exists = getStudent.get(parsed.studentId) || getStudentByCode.get(parsed.studentId);
+    if (STRICT_IDS && !exists) return;
+    const now = Date.now();
+    if (!recordEventFromLine.window) recordEventFromLine.window = { at: 0, id: null };
+    if (now - recordEventFromLine.window.at < SCAN_WINDOW_MS) {
+      if (parsed.studentId !== recordEventFromLine.window.id) return;
+      recordEventFromLine.window.at = now;
+    } else {
+      recordEventFromLine.window.at = now;
+      recordEventFromLine.window.id = parsed.studentId;
+    }
+    if (!recordEventFromLine.recent) recordEventFromLine.recent = new Map();
+    const lastTs = recordEventFromLine.recent.get(parsed.studentId) || 0;
+    if (now - lastTs < 2000) return;
+    recordEventFromLine.recent.set(parsed.studentId, now);
+    const type = resolveType(parsed.studentId, parsed.type);
+    const ts = nowIso();
+    insertEvent.run(parsed.studentId, type, ts);
+    recordEventFromLine.window = { at: 0, id: null };
+    try {
+      const p = getParentByStudent.get(parsed.studentId);
+      if (p && p.email) {
+        const s = getStudent.get(parsed.studentId);
+        const label = s ? (s.kind === "escolar" && s.name && s.grade ? `${s.name} (${s.grade})` : (s.kind === "universitario" && s.code ? s.code : s.id)) : parsed.studentId;
+        const subject = `Registro ${type}`;
+        const text = `Registro de asistencia\nAlumno: ${label}\nEvento: ${type}\nHora: ${new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}`;
+        trySendEmail(p.email, subject, text);
+      }
+    } catch {}
+    if (CLOUD_ENDPOINT) {
+      const payload = { student_id: parsed.studentId, type, ts };
+      try { fetch(CLOUD_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {}); } catch {}
+    }
+    const payload = { student_id: parsed.studentId, type, ts };
+    for (const res of sseClients) { try { res.write(`data: ${JSON.stringify(payload)}\n\n`); } catch {} }
   }
 }
 
@@ -113,22 +301,25 @@ async function detectArduinoPort() {
 }
 
 function startSerialOnPath(serialPath) {
-  const port = new SerialPort({ path: serialPath, baudRate: SERIAL_BAUD });
-  console.log(`Serial escuchando en ${serialPath} @ ${SERIAL_BAUD}`);
-  openedPorts.add(serialPath);
+  const port = new SerialPort({ path: serialPath, baudRate: SERIAL_BAUD, dataBits: 8, stopBits: 1, parity: 'none', autoOpen: true });
   portInstances.set(serialPath, port);
-  let buffer = "";
-  port.on("data", chunk => {
-    buffer += chunk.toString();
-    let idx;
-    while ((idx = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, idx).replace(/\r/g, "");
-      buffer = buffer.slice(idx + 1);
-      recordEventFromLine(line);
-    }
+  port.on("open", () => {
+    console.log(`Serial escuchando en ${serialPath} @ ${SERIAL_BAUD}`);
+    openedPorts.add(serialPath);
+    try { port.flush(() => {}); } catch {}
+  });
+  const parser = new ReadlineParser({ delimiter: '\n' });
+  port.pipe(parser);
+  parser.on("data", line => {
+    const text = String(line || "").replace(/\r+$/, '').trim();
+    if (!text) return;
+    rawLog.push(text);
+    if (rawLog.length > 100) rawLog.shift();
+    recordEventFromLine(text);
   });
   port.on("error", err => {
     console.warn(`Error serial en ${serialPath}: ${err && err.message ? err.message : String(err)}`);
+    openedPorts.delete(serialPath);
   });
   port.on("close", () => {
     openedPorts.delete(serialPath);
@@ -173,6 +364,7 @@ app.get("/api/ports", async (req, res) => {
 });
 
 app.post("/api/reconnect", async (req, res) => {
+  if (!isAuthenticated(req)) { res.status(403).json({ ok: false }); return; }
   for (const [path, port] of portInstances) {
     try { port.close(); } catch {}
     portInstances.delete(path);
@@ -190,6 +382,23 @@ app.get("/api/stream", (req, res) => {
   sseClients.add(res);
   const keep = setInterval(() => { try { res.write(`:ping\n\n`); } catch {} }, 15000);
   req.on("close", () => { clearInterval(keep); sseClients.delete(res); });
+});
+
+app.get("/api/raw", (req, res) => {
+  res.json({ lines: rawLog.slice(-50) });
+});
+
+app.get("/api/debug/parse", (req, res) => {
+  const q = req.query || {};
+  const line = String(q.line || "");
+  res.json({ parsed: parseLine(line) });
+});
+
+app.post("/api/debug/scan", (req, res) => {
+  const b = req.body || {};
+  const line = String(b.line || "");
+  recordEventFromLine(line);
+  res.json({ ok: true, parsed: parseLine(line) });
 });
 
 function dayBounds(dateStr) {
@@ -226,7 +435,46 @@ app.get("/api/stats", (req, res) => {
   res.json({ entradas, salidas, presentes });
 });
 
+app.get("/api/attendance", (req, res) => {
+  const q = req.query || {};
+  const kind = String(q.kind || "");
+  const id = q.id ? String(q.id) : null;
+  const code = q.code ? String(q.code) : null;
+  const sid = q.sid ? String(q.sid) : null;
+  const name = q.name ? String(q.name) : null;
+  let student = null;
+  if (sid) {
+    student = getStudent.get(sid) || getStudentByCode.get(sid);
+  }
+  if (!student && kind === "escolar" && name) {
+    student = getStudentByName.get(name);
+  }
+  if (!student) {
+    if (kind === "escolar" && id) student = getStudent.get(id);
+    if (kind === "universitario" && code) student = getStudentByCode.get(code);
+  }
+  if (!student) {
+    const lookupId = sid || (kind === "escolar" ? id : (kind === "universitario" ? (code && /^\d+$/.test(String(code)) ? String(code) : null) : null));
+    if (lookupId) {
+      const { start, end } = dayBounds(q.date);
+      const rows = selectEventsForStudentBetween.all(lookupId, start, end);
+      const last = rows[0] || null;
+      const present = last ? last.type === "entrada" : false;
+      res.json({ student: { id: lookupId, kind: kind || (sid ? "auto" : "escolar"), name: null, grade: null, code: sid || null }, present, last });
+      return;
+    }
+    res.status(404).json({ ok: false });
+    return;
+  }
+  const { start, end } = dayBounds(q.date);
+  const rows = selectEventsForStudentBetween.all(student.id, start, end);
+  const last = rows[0] || null;
+  const present = last ? last.type === "entrada" : false;
+  res.json({ student, present, last });
+});
+
 app.post("/api/reset", (req, res) => {
+  if (!isAuthenticated(req)) { res.status(403).json({ ok: false }); return; }
   db.exec("DELETE FROM events");
   res.json({ ok: true });
 });
@@ -252,6 +500,79 @@ app.post("/api/students", (req, res) => {
   }
   upsertStudent.run({ id, kind, name, grade, code });
   res.json({ ok: true });
+});
+
+ 
+
+app.post("/api/parents/email", async (req, res) => {
+  const b = req.body || {};
+  const kind = String(b.kind || "");
+  const email = String(b.email || "").trim();
+  const sid = b.sid ? String(b.sid) : null;
+  const name = b.name ? String(b.name) : null;
+  let student = null;
+  if (kind === "escolar" && b.id) student = getStudent.get(String(b.id));
+  if (kind === "universitario" && b.code) student = getStudentByCode.get(String(b.code));
+  if (!student && kind === "escolar" && name) student = getStudentByName.get(String(name));
+  let studentId = student ? student.id : null;
+  if (!studentId && sid) studentId = sid;
+  if (!studentId && kind === "escolar" && b.id) studentId = String(b.id);
+  if (!studentId && kind === "universitario" && b.code && /^\d+$/.test(String(b.code))) studentId = String(b.code);
+  if (!studentId || !email) { res.status(400).json({ ok: false }); return; }
+  upsertParent.run(studentId, b.name ? String(b.name) : null, null, b.phone ? String(b.phone) : null, email);
+  let sent = false;
+  try {
+    const s = getStudent.get(studentId) || null;
+    const label = s ? (s.kind === "escolar" && s.name && s.grade ? `${s.name} (${s.grade})` : (s.kind === "universitario" && s.code ? s.code : s.id)) : studentId;
+    const subject = "Notificaciones activadas";
+    const text = `Has activado las notificaciones por correo para: ${label}.\nRecibirás un correo en cada ingreso/salida.`;
+    sent = await trySendEmail(email, subject, text);
+  } catch {}
+  res.json({ ok: true, sent });
+});
+
+app.post("/api/test-email", (req, res) => {
+  const b = req.body || {};
+  const toRaw = String(b.to || "").trim();
+  const sid = b.student_id ? String(b.student_id) : null;
+  let target = null;
+  if (sid) {
+    try {
+      const p = getParentByStudent.get(sid);
+      if (p && p.email) target = String(p.email);
+    } catch {}
+  }
+  if (!target && toRaw) target = toRaw;
+  if (!target) { res.status(400).json({ ok: false, error: "missing_target" }); return; }
+  const subject = "Prueba de notificación";
+  const text = "Este es un correo de prueba de Registro y control.";
+  trySendEmail(target, subject, text).then(ok => {
+    if (ok) res.json({ ok: true, to: target });
+    else res.status(500).json({ ok: false, error: "send_failed" });
+  });
+});
+
+app.post("/api/simulate-scan", (req, res) => {
+  const b = req.body || {};
+  const studentId = String(b.student_id || "").trim();
+  const typeRaw = String(b.type || "").trim();
+  if (!studentId) { res.status(400).json({ ok: false, error: "missing_student_id" }); return; }
+  const exists = getStudent.get(studentId) || getStudentByCode.get(studentId);
+  if (!exists) { res.status(404).json({ ok: false, error: "student_not_found" }); return; }
+  const type = typeRaw === "entrada" || typeRaw === "salida" ? typeRaw : resolveType(studentId, null);
+  const ts = nowIso();
+  insertEvent.run(studentId, type, ts);
+  try {
+    const p = getParentByStudent.get(studentId);
+    if (p && p.email) {
+      const s = getStudent.get(studentId);
+      const label = s ? (s.kind === "escolar" && s.name && s.grade ? `${s.name} (${s.grade})` : (s.kind === "universitario" && s.code ? s.code : s.id)) : studentId;
+      const subject = `Registro ${type}`;
+      const text = `Registro de asistencia\nAlumno: ${label}\nEvento: ${type}\nHora: ${new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}`;
+      trySendEmail(p.email, subject, text);
+    }
+  } catch {}
+  res.json({ ok: true, student_id: studentId, type, ts });
 });
 
 app.get("/api/students/:id", (req, res) => {
@@ -407,6 +728,16 @@ app.get('/dashboard.html', requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
+app.get('/parent.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+app.get('/parent-dashboard.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+app.get('/parent-stats.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'stats.html'));
+});
+
 app.get('/', requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
@@ -416,4 +747,5 @@ app.use(express.static(path.join(__dirname, "public")));
 app.listen(PORT, () => {
   initSerial();
   console.log(`Servidor listo en http://localhost:${PORT}`);
+  try { console.log(parseLine("ESTUDIANTE:1:Juan Perez:ESTADO:FUERA")); } catch {}
 });

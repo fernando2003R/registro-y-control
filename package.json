@@ -12,10 +12,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@vercel/blob": "^0.23.0",
+    "@vercel/kv": "^1.0.1",
     "better-sqlite3": "^12.4.6",
     "express": "^5.1.0",
-    "serialport": "^13.0.0",
-    "@vercel/kv": "^1.0.1",
-    "@vercel/blob": "^0.23.0"
+    "nodemailer": "^7.0.10",
+    "serialport": "^13.0.0"
   }
 }

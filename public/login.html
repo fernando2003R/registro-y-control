@@ -24,8 +24,28 @@
         <select id="mode">
           <option value="admin">Acceso administrador</option>
           <option value="student">Registro estudiante</option>
+          <option value="parent">Acceso padres</option>
         </select>
       </div>
+    </div>
+    <div id="parentForm" style="display:none">
+      <label>Tipo</label>
+      <select id="p_kind">
+        <option value="escolar">Escolar</option>
+        <option value="universitario">Universitario</option>
+      </select>
+      <label id="p_label">Nombre</label>
+      <input id="p_sid" placeholder="Ej: Juan Perez">
+      <button id="check">Consultar</button>
+      <div style="margin-top:12px">
+        <label>Correo electrónico (opcional)</label>
+        <input id="p_email" placeholder="Ej: padre@gmail.com">
+        <button id="enable_email">Activar por correo</button>
+      </div>
+      <div style="margin-top:12px">
+        <button id="open_parent">Ver registros (vista padres)</button>
+      </div>
+      <div id="parentResult" style="margin-top:8px"></div>
     </div>
     <div id="adminForm">
       <label>Código administrador</label>
